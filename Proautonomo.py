@@ -3,11 +3,17 @@ import subprocess
 import os
 from datetime import datetime
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Spacer
 from reportlab.lib import colors
+from shutil import copy
 from shutil import copyfile
+import threading
+from time import time
+from reportlab.lib.units import inch
+
 
 def mostrar_menu():
+
     print("\nMenu de Opciones:")
     print("1. Crear usuario en la base de datos")
     print("2. Lista de usuarios en la base de datos")
@@ -20,7 +26,9 @@ def mostrar_menu():
     print("9. Restaurar base de datos")
     print("10. Generar PDF")
     print("11. CRUD")
-    print("12. Salir")
+    print("12. Triggers de auditoría")
+    print("13. Aplicación de hilos")
+    print("14. Salir")
 
 # CREAR USUARIOS
 def crear_usuario_oracle(cursor, nombre_usuario, contraseña):
@@ -611,9 +619,242 @@ def opcion11(cursor):
     else:
         print("No se encontraron tablas en el esquema especificado.")
 
+
+
+        #TRIGGERS
+def obtener_columnas(cursor, tabla):
+    cursor.execute("""
+        SELECT column_name FROM user_tab_columns WHERE table_name = :1
+    """, [tabla])
+    return [row[0] for row in cursor.fetchall()]
+
+def crear_funcion_trigger(tabla, columnas):
+    columnas_str = ' || \',\' || '.join([f':NEW.{col}' for col in columnas])
+    columnas_str_old = ' || \',\' || '.join([f':OLD.{col}' for col in columnas])
+    return f"""
+    CREATE OR REPLACE TRIGGER audit_{tabla}_trg
+    AFTER INSERT OR UPDATE OR DELETE ON {tabla}
+    FOR EACH ROW
+    BEGIN
+        IF INSERTING THEN
+            INSERT INTO AUDITORIA (NOMBRE_TABLA, USUARIO_DB, ACCION, DESCRIPCION_CAMBIOS)
+            VALUES ('{tabla}', USER, 'INSERT', {columnas_str});
+        ELSIF UPDATING THEN
+            INSERT INTO AUDITORIA (NOMBRE_TABLA, USUARIO_DB, ACCION, DESCRIPCION_CAMBIOS)
+            VALUES ('{tabla}', USER, 'UPDATE', {columnas_str});
+        ELSIF DELETING THEN
+            INSERT INTO AUDITORIA (NOMBRE_TABLA, USUARIO_DB, ACCION, DESCRIPCION_CAMBIOS)
+            VALUES ('{tabla}', USER, 'DELETE', {columnas_str_old});
+        END IF;
+    END;
+    """
+
+def crear_trigger(cursor, tabla, columnas, sql_file):
+    try:
+        drop_sql = f"""
+        BEGIN
+            EXECUTE IMMEDIATE 'DROP TRIGGER audit_{tabla}_trg';
+        EXCEPTION
+            WHEN OTHERS THEN
+                IF SQLCODE != -4080 THEN
+                    RAISE;
+                END IF;
+        END;
+        """
+        cursor.execute(drop_sql)
+        sql_file.write(drop_sql + '\n')
+    except cx_Oracle.DatabaseError as e:
+        print(f"Error al eliminar el trigger para {tabla}: {e}")
+    
+    trigger_sql = crear_funcion_trigger(tabla, columnas)
+    cursor.execute(trigger_sql)
+    sql_file.write(trigger_sql + '\n')
+    print(f"Trigger de auditoría creado para la tabla {tabla}")
+
+def opcion12(cursor):
+    print("Ejecutando Opción 1...")
+
+    cursor.execute("SELECT table_name FROM user_tables")
+    tablas = cursor.fetchall()
+
+    print("\nTablas disponibles en la base de datos:")
+    for idx, tabla in enumerate(tablas):
+        print(f"{idx + 1}. {tabla[0]}")
+
+    seleccion = input("\nSeleccione las tablas para auditar (separadas por coma, o 'all' para todas): ")
+
+    if seleccion.lower() == 'all':
+        tablas_seleccionadas = [tabla[0] for tabla in tablas]
+    else:
+        try:
+            indices = map(int, seleccion.split(','))
+            tablas_seleccionadas = [tablas[idx - 1][0] for idx in indices]
+        except ValueError:
+            print("Selección inválida. Por favor, use números separados por comas.")
+            return
+
+    with open("auditoria_triggers.sql", "w", encoding="utf-8") as sql_file:
+        for tabla in tablas_seleccionadas:
+            if tabla.lower() != 'auditoria':
+                columnas = obtener_columnas(cursor, tabla)
+                crear_trigger(cursor, tabla, columnas, sql_file)
+
+    print("\nDisparadores de auditoría creados exitosamente y guardados en 'auditoria_triggers.sql'.")
+
+
+#hilos
+def ejecutar_consulta(cursor, lock, query, results, index):
+    try:
+        start_time = time()
+        with lock:
+            cursor.execute(query)
+            result = cursor.fetchall()
+            headers = [desc[0] for desc in cursor.description]
+        end_time = time()
+        execution_time = end_time - start_time
+        results[index] = (headers, result, execution_time)
+    except Exception as e:
+        results[index] = ([], str(e), 0)
+
+def opcion13(cursor):
+    print("Ejecutando Opción 13...")
+
+    # Consultas complejas
+    queries = [
+       
+        """
+    SELECT 
+        RESERVAS.RESERVA_ID, 
+        RESERVAS.FECHA_RESERVA, 
+        PASAJEROS.NOMBRE, 
+        PASAJEROS.APELLIDO, 
+        VUELOS.FECHA_SALIDA, 
+        VUELOS.FECHA_LLEGADA
+    FROM 
+        RESERVAS 
+    INNER JOIN 
+        PASAJEROS ON RESERVAS.PASAJERO_ID = PASAJEROS.PASAJERO_ID
+    INNER JOIN 
+        VUELOS ON RESERVAS.VUELO_ID = VUELOS.VUELO_ID;
+    """,
+    
+    # Consulta 2: Vuelos con detalles de la aerolínea y los aeropuertos de origen y destino
+    """
+    SELECT 
+        VUELOS.VUELO_ID, 
+        VUELOS.FECHA_SALIDA, 
+        VUELOS.FECHA_LLEGADA, 
+        AEROLINEAS.NOMBRE AS NOMBRE_AEROLINEA, 
+        AEROPUERTOS_ORIGEN.NOMBRE AS AEROPUERTO_ORIGEN, 
+        AEROPUERTOS_DESTINO.NOMBRE AS AEROPUERTO_DESTINO
+    FROM 
+        VUELOS
+    INNER JOIN 
+        AEROLINEAS ON VUELOS.AEROLINEA_ID = AEROLINEAS.AEROLINEA_ID
+    INNER JOIN 
+        AEROPUERTOS AEROPUERTOS_ORIGEN ON VUELOS.ORIGEN_AEROPUERTO_ID = AEROPUERTOS_ORIGEN.AEROPUERTO_ID
+    INNER JOIN 
+        AEROPUERTOS AEROPUERTOS_DESTINO ON VUELOS.DESTINO_AEROPUERTO_ID = AEROPUERTOS_DESTINO.AEROPUERTO_ID;
+    """,
+    
+    # Consulta 3: Pasajeros con sus contactos de emergencia
+    """
+    SELECT 
+        PASAJEROS.NOMBRE, 
+        PASAJEROS.APELLIDO, 
+        CONTACTOS_DE_EMERGENCIA_DE_PASAJEROS.NOMBRE AS NOMBRE_CONTACTO, 
+        CONTACTOS_DE_EMERGENCIA_DE_PASAJEROS.APELLIDO AS APELLIDO_CONTACTO, 
+        CONTACTOS_DE_EMERGENCIA_DE_PASAJEROS.TELEFONO
+    FROM 
+        PASAJEROS
+    INNER JOIN 
+        CONTACTOS_DE_EMERGENCIA_DE_PASAJEROS ON PASAJEROS.PASAJERO_ID = CONTACTOS_DE_EMERGENCIA_DE_PASAJEROS.PASAJERO_ID;
+    """,
+    
+    # Consulta 4: Precios de clases de vuelo con detalles de la clase
+    """
+    SELECT 
+        PRECIOS_DE_CLASES_DE_VUELO.PRECIO_ID, 
+        CLASES_DE_VUELO.NOMBRE, 
+        CLASES_DE_VUELO.DESCRIPCION, 
+        PRECIOS_DE_CLASES_DE_VUELO.PRECIO
+    FROM 
+        PRECIOS_DE_CLASES_DE_VUELO
+    INNER JOIN 
+        CLASES_DE_VUELO ON PRECIOS_DE_CLASES_DE_VUELO.CLASE_VUELO_ID = CLASES_DE_VUELO.CLASE_VUELO_ID;
+    """,
+    
+    # Consulta 5: Vuelos con la tripulación asignada
+    """
+    SELECT 
+        VUELOS.VUELO_ID, 
+        VUELOS.FECHA_SALIDA, 
+        VUELOS.FECHA_LLEGADA, 
+        TRIPULACION.NOMBRE AS NOMBRE_TRIPULANTE, 
+        TRIPULACION.APELLIDO AS APELLIDO_TRIPULANTE, 
+        TRIPULACION.ROL
+    FROM 
+        TRIPULACIONES_VUELOS
+    INNER JOIN 
+        VUELOS ON TRIPULACIONES_VUELOS.VUELO_ID = VUELOS.VUELO_ID
+    INNER JOIN 
+        TRIPULACION ON TRIPULACIONES_VUELOS.TRIPULACION_ID = TRIPULACION.TRIPULACION_ID;
+    """
+    ]
+
+    threads = []
+    results = [None] * len(queries)
+    lock = threading.Lock()
+
+    for i, query in enumerate(queries):
+        thread = threading.Thread(target=ejecutar_consulta, args=(cursor, lock, query, results, i))
+        threads.append(thread)
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    generar_pdf_con_resultados(queries, results)
+
+def generar_pdf_con_resultados(queries, results):
+    fecha_hora = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_path = f"Resultados_Consultas_{fecha_hora}.pdf"
+
+    doc = SimpleDocTemplate(output_path, pagesize=letter)
+    story = []
+
+    for i, (query, (headers, result, exec_time)) in enumerate(zip(queries, results)):
+        story.append(Table([[f"Consulta {i + 1}", query]], colWidths=[2.5 * inch, 4.5 * inch]))
+        story.append(Table([["Tiempo de ejecución:", f"{exec_time} segundos"]], colWidths=[2.5 * inch, 4.5 * inch]))
+        story.append(Table([["Resultados:"]], colWidths=[7 * inch]))
+        
+        if isinstance(result, list) and result:
+            data = [headers] + result
+        else:
+            data = [["Sin resultados"]]
+        
+        t = Table(data)
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.gray),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('BOX', (0, 0), (-1, -1), 2, colors.black),
+        ]))
+        
+        story.append(t)
+        story.append(Spacer(1, 12))
+
+    doc.build(story)
+    print(f"Informe generado en: {output_path}")
+
+
 def main():
     dsn_tns = cx_Oracle.makedsn('localhost', '1521', service_name='xe')
-    conexion = cx_Oracle.connect(user='system', password='123456', dsn=dsn_tns)
+    conexion = cx_Oracle.connect(user='Moreira', password='123456', dsn=dsn_tns)
     cursor = conexion.cursor()
 
     while True:
@@ -642,6 +883,10 @@ def main():
         elif opcion == '11':
             opcion11(cursor)
         elif opcion == '12':
+            opcion12(cursor)
+        elif opcion == '13':
+            opcion13(cursor)
+        elif opcion == '14':
             print("Saliendo del programa...")
             break
         else:
