@@ -702,105 +702,106 @@ def opcion12(cursor):
     print("\nDisparadores de auditoría creados exitosamente y guardados en 'auditoria_triggers.sql'.")
 
 
-#hilos
 def ejecutar_consulta(cursor, lock, query, results, index):
     try:
         start_time = time()
         with lock:
+            print(f"Ejecutando consulta {index + 1}: {query}")
             cursor.execute(query)
             result = cursor.fetchall()
             headers = [desc[0] for desc in cursor.description]
         end_time = time()
         execution_time = end_time - start_time
         results[index] = (headers, result, execution_time)
+        print(f"Consulta {index + 1} resultados: {result}")
     except Exception as e:
         results[index] = ([], str(e), 0)
+        print(f"Error en la consulta {index + 1}: {e}")
 
 def opcion13(cursor):
     print("Ejecutando Opción 13...")
 
     # Consultas complejas
+    
     queries = [
-       
-        """
+    """
     SELECT 
-        RESERVAS.RESERVA_ID, 
-        RESERVAS.FECHA_RESERVA, 
-        PASAJEROS.NOMBRE, 
-        PASAJEROS.APELLIDO, 
-        VUELOS.FECHA_SALIDA, 
-        VUELOS.FECHA_LLEGADA
-    FROM 
-        RESERVAS 
-    INNER JOIN 
-        PASAJEROS ON RESERVAS.PASAJERO_ID = PASAJEROS.PASAJERO_ID
-    INNER JOIN 
-        VUELOS ON RESERVAS.VUELO_ID = VUELOS.VUELO_ID;
+        Usuarios.usuario_id, 
+        Usuarios.nombre,
+        Usuarios.apellido,
+        Roles.nombre AS rol
+    FROM
+        Usuarios
+    INNER JOIN
+        Usuarios_Roles
+    ON
+        Usuarios.usuario_id = Usuarios_Roles.usuario_id
+    INNER JOIN
+        Roles
+    ON
+        Usuarios_Roles.rol_id = Roles.rol_id
     """,
-    
-    # Consulta 2: Vuelos con detalles de la aerolínea y los aeropuertos de origen y destino
     """
-    SELECT 
-        VUELOS.VUELO_ID, 
-        VUELOS.FECHA_SALIDA, 
-        VUELOS.FECHA_LLEGADA, 
-        AEROLINEAS.NOMBRE AS NOMBRE_AEROLINEA, 
-        AEROPUERTOS_ORIGEN.NOMBRE AS AEROPUERTO_ORIGEN, 
-        AEROPUERTOS_DESTINO.NOMBRE AS AEROPUERTO_DESTINO
-    FROM 
-        VUELOS
-    INNER JOIN 
-        AEROLINEAS ON VUELOS.AEROLINEA_ID = AEROLINEAS.AEROLINEA_ID
-    INNER JOIN 
-        AEROPUERTOS AEROPUERTOS_ORIGEN ON VUELOS.ORIGEN_AEROPUERTO_ID = AEROPUERTOS_ORIGEN.AEROPUERTO_ID
-    INNER JOIN 
-        AEROPUERTOS AEROPUERTOS_DESTINO ON VUELOS.DESTINO_AEROPUERTO_ID = AEROPUERTOS_DESTINO.AEROPUERTO_ID;
+    SELECT
+        Aerolineas.nombre,
+        Aeropuertos.nombre AS aeropuerto,
+        Rutas_de_Vuelo.distancia_km
+    FROM
+        Aerolineas
+    INNER JOIN
+        Vuelos
+    ON
+        Aerolineas.aerolinea_id = Vuelos.aerolinea_id
+    INNER JOIN
+        Rutas_de_Vuelo
+    ON
+        Vuelos.origen_aeropuerto_id = Rutas_de_Vuelo.origen_aeropuerto_id
+        AND Vuelos.destino_aeropuerto_id = Rutas_de_Vuelo.destino_aeropuerto_id
+    INNER JOIN
+        Aeropuertos
+    ON
+        Aeropuertos.aeropuerto_id = Vuelos.origen_aeropuerto_id
     """,
-    
-    # Consulta 3: Pasajeros con sus contactos de emergencia
     """
-    SELECT 
-        PASAJEROS.NOMBRE, 
-        PASAJEROS.APELLIDO, 
-        CONTACTOS_DE_EMERGENCIA_DE_PASAJEROS.NOMBRE AS NOMBRE_CONTACTO, 
-        CONTACTOS_DE_EMERGENCIA_DE_PASAJEROS.APELLIDO AS APELLIDO_CONTACTO, 
-        CONTACTOS_DE_EMERGENCIA_DE_PASAJEROS.TELEFONO
-    FROM 
-        PASAJEROS
-    INNER JOIN 
-        CONTACTOS_DE_EMERGENCIA_DE_PASAJEROS ON PASAJEROS.PASAJERO_ID = CONTACTOS_DE_EMERGENCIA_DE_PASAJEROS.PASAJERO_ID;
+    SELECT
+        Pasajeros.nombre,
+        Pasajeros.apellido,
+        Reservas.fecha_reserva
+    FROM
+        Pasajeros
+    INNER JOIN
+        Reservas
+    ON
+        Pasajeros.pasajero_id = Reservas.pasajero_id
     """,
-    
-    # Consulta 4: Precios de clases de vuelo con detalles de la clase
     """
-    SELECT 
-        PRECIOS_DE_CLASES_DE_VUELO.PRECIO_ID, 
-        CLASES_DE_VUELO.NOMBRE, 
-        CLASES_DE_VUELO.DESCRIPCION, 
-        PRECIOS_DE_CLASES_DE_VUELO.PRECIO
-    FROM 
-        PRECIOS_DE_CLASES_DE_VUELO
-    INNER JOIN 
-        CLASES_DE_VUELO ON PRECIOS_DE_CLASES_DE_VUELO.CLASE_VUELO_ID = CLASES_DE_VUELO.CLASE_VUELO_ID;
+    SELECT
+        Vuelos.vuelo_id,
+        Aerolineas.nombre,
+        Vuelos.fecha_salida,
+        Vuelos.fecha_llegada
+    FROM
+        Vuelos
+    INNER JOIN
+        Aerolineas
+    ON
+        Vuelos.aerolinea_id = Aerolineas.aerolinea_id
     """,
-    
-    # Consulta 5: Vuelos con la tripulación asignada
     """
-    SELECT 
-        VUELOS.VUELO_ID, 
-        VUELOS.FECHA_SALIDA, 
-        VUELOS.FECHA_LLEGADA, 
-        TRIPULACION.NOMBRE AS NOMBRE_TRIPULANTE, 
-        TRIPULACION.APELLIDO AS APELLIDO_TRIPULANTE, 
-        TRIPULACION.ROL
-    FROM 
-        TRIPULACIONES_VUELOS
-    INNER JOIN 
-        VUELOS ON TRIPULACIONES_VUELOS.VUELO_ID = VUELOS.VUELO_ID
-    INNER JOIN 
-        TRIPULACION ON TRIPULACIONES_VUELOS.TRIPULACION_ID = TRIPULACION.TRIPULACION_ID;
+    SELECT
+        Equipaje.equipaje_id,
+        Pasajeros.nombre,
+        Pasajeros.apellido,
+        Equipaje.peso_kg
+    FROM
+        Equipaje
+    INNER JOIN
+        Pasajeros
+    ON
+        Equipaje.pasajero_id = Pasajeros.pasajero_id
     """
-    ]
+]
+
 
     threads = []
     results = [None] * len(queries)
@@ -813,6 +814,10 @@ def opcion13(cursor):
 
     for thread in threads:
         thread.join()
+
+    print("Resultados de todas las consultas:")
+    for i, result in enumerate(results):
+        print(f"Consulta {i + 1} resultados: {result}")
 
     generar_pdf_con_resultados(queries, results)
 
@@ -827,30 +832,39 @@ def generar_pdf_con_resultados(queries, results):
         story.append(Table([[f"Consulta {i + 1}", query]], colWidths=[2.5 * inch, 4.5 * inch]))
         story.append(Table([["Tiempo de ejecución:", f"{exec_time} segundos"]], colWidths=[2.5 * inch, 4.5 * inch]))
         story.append(Table([["Resultados:"]], colWidths=[7 * inch]))
-        
+
         if isinstance(result, list) and result:
             data = [headers] + result
         else:
             data = [["Sin resultados"]]
-        
+
         t = Table(data)
         t.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.gray),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ('BOX', (0, 0), (-1, -1), 2, colors.black),
-        ]))
-        
+            ('BACKGROUND', (0, 0), (-1, 0), colors.black),      # Fondo negro en la fila de encabezado
+    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),  # Texto blanco en la fila de encabezado
+    ('ALIGN', (0, 0), (-1, 0), 'CENTER'),               # Alineación centrada en la fila de encabezado
+    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),    # Fuente en negrita en la fila de encabezado
+    ('FONTSIZE', (0, 0), (-1, 0), 14),                  # Tamaño de fuente 14 en la fila de encabezado
+    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),             # Espaciado inferior en la fila de encabezado
+    ('BACKGROUND', (0, 1), (-1, -1), colors.white),     # Fondo blanco para las celdas del contenido
+    ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),      # Texto negro para las celdas del contenido
+    ('GRID', (0, 0), (-1, -1), 1, colors.black),        # Rejilla negra alrededor de todas las celdas
+    ('BOX', (0, 0), (-1, -1), 2, colors.red),         # Bordes negros alrededor de toda la tabla
+    ('BACKGROUND', (0, 1), (-1, 1), colors.lightgrey),  # Fondo gris claro para la segunda fila
+    ('BACKGROUND', (0, 3), (-1, 3), colors.lightgrey),  # Fondo gris claro para la cuarta fila
+    ('LINEBEFORE', (0, 0), (0, -1), 2, colors.red),     # Línea roja a la izquierda de la primera columna
+    ('LINEABOVE', (0, 2), (-1, 2), 2, colors.red),      # Línea roja por encima de la tercera fila
+    ('LINEBELOW', (0, -1), (-1, -1), 2, colors.red),    # Línea roja debajo de la última fila
+    ('ALIGN', (0, 1), (-1, -1), 'LEFT'),                # Alineación a la izquierda para todas las celdas
+    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),             # Alineación vertical al centro para todas las celdas
+    
+]))
+
         story.append(t)
         story.append(Spacer(1, 12))
 
     doc.build(story)
     print(f"Informe generado en: {output_path}")
-
 
 def main():
     dsn_tns = cx_Oracle.makedsn('localhost', '1521', service_name='xe')
